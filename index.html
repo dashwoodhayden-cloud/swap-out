@@ -13,6 +13,16 @@
 <meta property="og:url" content="https://swapout.live">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#071019">
+<script>
+  // Register the service worker (makes the game installable + playable offline)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
 
 <!-- ============================================================
      ADSENSE — verified site code (publisher ca-pub-4100603573394605)
