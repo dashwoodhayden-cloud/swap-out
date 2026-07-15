@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SWAP OUT — Recording Mode</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #071019; touch-action: manipulation; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  #game { display: block; width: 100vw; height: 100vh; }
+  .overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    background: rgba(7, 16, 25, 0.9); backdrop-filter: blur(5px);
+    color: #eaf6ff; text-align: center; z-index: 10; padding: 20px;
+    transition: opacity 0.25s ease;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; }
+  .title { font-size: clamp(36px, 9vw, 64px); font-weight: 900; letter-spacing: 4px; color: #35f0c8; }
+  .title span { color: #ff7a59; }
+  .rec-label { color: #ff5252; font-weight: 800; letter-spacing: 3px; font-size: 13px; }
+  .mode-btn {
+    background: rgba(53, 240, 200, 0.08); color: #eaf6ff; border: 1.5px solid #35f0c8;
+    border-radius: 14px; padding: 14px 18px; font-size: 14px; font-weight: 700;
+    cursor: pointer; width: min(340px, 88vw); text-align: left; line-height: 1.4;
+  }
+  .mode-btn small { display: block; color: #9db4c8; font-weight: 400; font-size: 12px; margin-top: 3px; }
+  .mode-btn:active { transform: scale(0.97); }
+  .hint { color: #9db4c8; font-size: 12px; max-width: 320px; line-height: 1.6; }
+  #hud {
+    position: fixed; top: 16px; left: 0; right: 0; text-align: center;
+    color: #eaf6ff; font-size: 38px; font-weight: 900; z-index: 5;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.6); pointer-events: none; display: none;
+  }
+  /* Reel text overlays */
+  #reelText {
+    position: fixed; top: 16%; left: 0; right: 0; z-index: 8;
+    text-align: center; pointer-events: none; padding: 0 24px;
+    font-size: clamp(26px, 7.5vw, 44px); font-weight: 900; line-height: 1.2;
+    color: #ffffff; letter-spacing: 0.5px; text-transform: uppercase;
+    -webkit-text-stroke: 1.5px #000;
+    text-shadow: 3px 3px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000;
+    opacity: 0; transition: opacity 0.15s ease;
+  }
+  #reelText.show { opacity: 1; }
+  #reelText .accent { color: #35f0c8; }
+  #reelText .danger { color: #ff7a59; }
+  #countdown {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    z-index: 9; pointer-events: none; font-size: 120px; font-weight: 900; color: #35f0c8;
+    text-shadow: 4px 4px 0 #000;
+  }
+  #endCard {
+    position: fixed; inset: 0; display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; z-index: 9;
+    background: #071019; pointer-events: none; text-align: center; padding: 24px;
+  }
+  #endCard .big { font-size: clamp(40px, 10vw, 70px); font-weight: 900; letter-spacing: 4px; color: #35f0c8; }
+  #endCard .big span { color: #ff7a59; }
+  #endCard .line { font-size: clamp(20px, 5.5vw, 30px); font-weight: 800; color: #ffffff; }
+  #endCard .cta { font-size: clamp(16px, 4.5vw, 22px); font-weight: 700; color: #ffd166; letter-spacing: 2px; }
+  #stopHint {
+    position: fixed; bottom: 12px; left: 0; right: 0; text-align: center; z-index: 11;
+    color: rgba(157,180,200,0.6); font-size: 11px; letter-spacing: 1px; display: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">0</div>
+<div id="reelText"></div>
+<div id="countdown">3</div>
+<div id="endCard">
+  <div class="big">SWAP<span>OUT</span></div>
+  <div class="line" id="endLine"></div>
+  <div class="cta" id="endCta"></div>
+</div>
+<div id="stopHint">stop your screen recording now, then tap to return</div>
+
+<div class="overlay" id="startScreen">
+  <div class="rec-label">● RECORDING MODE</div>
+  <div class="title">SWAP<span>OUT</span></div>
+  <button class="mode-btn" data-mode="1">🎬 REEL 1 — The Hook
+    <small>Timed hook text plays automatically. Just play well for ~13 seconds. Ends on a title card.</small>
+  </button>
+  <button class="mode-btn" data-mode="2">😤 REEL 2 — The Rage Bait
+    <small>Play until you die. Your real score + the challenge card appear automatically.</small>
+  </button>
+  <button class="mode-btn" data-mode="3">🤌 REEL 3 — The Satisfying One
+    <small>Bait seekers into crashing. Crashes trigger automatic slow-mo. End card on death.</small>
+  </button>
+  <div class="hint">Start your phone's screen recording FIRST, then pick a reel. A 3-2-1 countdown gives you a clean trim point. Overlays are positioned upper-third, clear of Instagram's UI.</div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const hud = document.getElementById('hud');
+  const reelText = document.getElementById('reelText');
+  const countdownEl = document.getElementById('countdown');
+  const endCard = document.getElementById('endCard');
+  const endLine = document.getElementById('endLine');
+  const endCta = document.getElementById('endCta');
+  const stopHint = document.getElementById('stopHint');
+  const startScreen = document.getElementById('startScreen');
+
+  const TEAL = '#35f0c8', CORAL = '#ff7a59', INK = '#071019', GOLD = '#ffd166';
+
+  let W, H, DPR;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  // ---------- Reel scripts ----------
+  // t/dur in seconds from run start. html allowed for colour spans.
+  const REELS = {
+    1: {
+      overlays: [
+        { t: 0.0, dur: 3.0, html: 'a game where you <span class="danger">CANNOT MOVE</span>' },
+        { t: 3.2, dur: 2.2, html: 'no joystick. no buttons.' },
+        { t: 5.8, dur: 2.4, html: 'you can only <span class="accent">SWAP</span>' }
+      ],
+      autoEndAt: 12, // seconds -> cut to title card even if still alive
+      end: { line: '', cta: 'FREE — LINK IN BIO' }
+    },
+    2: {
+      overlays: [
+        { t: 0.0, dur: 3.2, html: 'I MADE this game<br>and I can\'t score <span class="danger">15</span>' }
+      ],
+      onDeath: (score) => ({
+        line: 'score: ' + score + ' 😤',
+        cta: 'BEAT 15 AND I\'LL PIN YOUR COMMENT'
+      })
+    },
+    3: {
+      overlays: [
+        { t: 0.0, dur: 2.6, html: 'the most <span class="accent">satisfying</span> move in SWAP OUT' }
+      ],
+      slowMoOnCrash: true,
+      onDeath: () => ({ line: '', cta: 'FREE — LINK IN BIO' })
+    }
+  };
+
+  let activeReel = null;
+  let runTime = 0;
+  let overlayIdx = -1;
+  let timeScale = 1, slowMoTimer = 0;
+
+  function updateOverlays() {
+    if (!activeReel) return;
+    let showing = null;
+    for (const o of activeReel.overlays) {
+      if (runTime >= o.t && runTime < o.t + o.dur) { showing = o; break; }
+    }
+    if (showing) {
+      if (reelText.innerHTML !== showing.html) reelText.innerHTML = showing.html;
+      reelText.classList.add('show');
+    } else {
+      reelText.classList.remove('show');
+    }
+  }
+
+  function showEndCard(cfg) {
+    reelText.classList.remove('show');
+    endLine.textContent = cfg.line || '';
+    endLine.style.display = cfg.line ? 'block' : 'none';
+    endCta.textContent = cfg.cta || '';
+    endCard.style.display = 'flex';
+    // after 3s, show the "stop recording" hint (it's small + bottom, easy to trim)
+    setTimeout(() => {
+      stopHint.style.display = 'block';
+      window.addEventListener('pointerdown', backToMenu, { once: true });
+    }, 3000);
+  }
+
+  function backToMenu() {
+    endCard.style.display = 'none';
+    stopHint.style.display = 'none';
+    hud.style.display = 'none';
+    activeReel = null;
+    state = 'menu';
+    startScreen.classList.remove('hidden');
+  }
+
+  // ---------- Game state ----------
+  let state = 'menu';
+  let player, shards, seekers, particles, beams, ripples;
+  let score, swaps, kills, elapsed;
+  let swapCooldown, spawnTimerShard, spawnTimerSeeker, difficulty;
+  let shake = 0, lastTime = 0;
+
+  const PLAYER_R = 13, SHARD_R = 10, SEEKER_R = 12;
+  const SWAP_COOLDOWN = 0.45, TAP_RADIUS = 55;
+
+  function reset() {
+    player = { x: W / 2, y: H / 2, pulse: 0 };
+    shards = []; seekers = []; particles = []; beams = []; ripples = [];
+    score = 0; swaps = 0; kills = 0; elapsed = 0;
+    swapCooldown = 0; difficulty = 0;
+    spawnTimerShard = 0.5; spawnTimerSeeker = 1.6;
+    runTime = 0; timeScale = 1; slowMoTimer = 0;
+    hud.textContent = '0';
+    spawnShard(); spawnShard();
+  }
+
+  function safeSpawnPos(minDist) {
+    let x, y, tries = 0;
+    do {
+      x = rand(40, W - 40); y = rand(H * 0.28, H - 40); // keep play area below text zone
+      tries++;
+    } while (Math.hypot(x - player.x, y - player.y) < minDist && tries < 20);
+    return { x, y };
+  }
+
+  function spawnShard() {
+    const p = safeSpawnPos(90);
+    shards.push({ x: p.x, y: p.y, life: rand(6, 9), t: 0, spin: Math.random() * Math.PI * 2 });
+  }
+
+  function spawnSeeker() {
+    const side = Math.floor(rand(0, 4));
+    let x, y;
+    if (side === 0) { x = -20; y = rand(0, H); }
+    else if (side === 1) { x = W + 20; y = rand(0, H); }
+    else if (side === 2) { x = rand(0, W); y = -20; }
+    else { x = rand(0, W); y = H + 20; }
+    seekers.push({
+      x, y,
+      speed: rand(55, 75) + difficulty * 7,
+      turn: rand(1.2, 2.0),
+      angle: Math.atan2(player.y - y, player.x - x),
+      wobble: Math.random() * Math.PI * 2
+    });
+  }
+
+  function burst(x, y, color, n, spd = 300) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(spd * 0.3, spd);
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: 0, life: rand(0.35, 0.8), color, r: rand(2, 4.5) });
+    }
+  }
+
+  function addBeam(x1, y1, x2, y2, color) { beams.push({ x1, y1, x2, y2, t: 0, life: 0.28, color }); }
+  function addRipple(x, y, color) { ripples.push({ x, y, t: 0, life: 0.5, color }); }
+
+  function doSwap(target, list) {
+    const px = player.x, py = player.y;
+    addBeam(px, py, target.x, target.y, TEAL);
+    addRipple(px, py, CORAL);
+    addRipple(target.x, target.y, TEAL);
+    player.x = target.x; player.y = target.y;
+    player.pulse = 1;
+    if (list === shards) {
+      shards.splice(shards.indexOf(target), 1);
+      score += 3;
+      burst(px, py, TEAL, 12);
+      spawnShard();
+    } else {
+      target.x = px; target.y = py;
+      target.angle = Math.atan2(player.y - target.y, player.x - target.x);
+      score += 1;
+      burst(target.x, target.y, CORAL, 8, 180);
+    }
+    swaps++;
+    swapCooldown = SWAP_COOLDOWN;
+    hud.textContent = score;
+  }
+
+  function handleTap(x, y) {
+    if (state !== 'playing' || swapCooldown > 0) return;
+    let bestT = null, bestD = TAP_RADIUS, bestList = null;
+    for (const s of shards) {
+      const d = Math.hypot(x - s.x, y - s.y);
+      if (d < bestD) { bestD = d; bestT = s; bestList = shards; }
+    }
+    for (const s of seekers) {
+      const d = Math.hypot(x - s.x, y - s.y);
+      if (d < bestD) { bestD = d; bestT = s; bestList = seekers; }
+    }
+    if (bestT) doSwap(bestT, bestList);
+  }
+
+  canvas.addEventListener('pointerdown', (e) => { e.preventDefault(); handleTap(e.clientX, e.clientY); });
+
+  // ---------- Mode start with countdown ----------
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeReel = REELS[btn.dataset.mode];
+      startScreen.classList.add('hidden');
+      reset();
+      state = 'countdown';
+      let n = 3;
+      countdownEl.style.display = 'flex';
+      countdownEl.textContent = n;
+      const iv = setInterval(() => {
+        n--;
+        if (n > 0) countdownEl.textContent = n;
+        else {
+          clearInterval(iv);
+          countdownEl.style.display = 'none';
+          state = 'playing';
+          hud.style.display = 'block';
+        }
+      }, 900);
+    });
+  });
+
+  function gameOver() {
+    state = 'dead';
+    burst(player.x, player.y, TEAL, 50, 450);
+    shake = 14;
+    hud.style.display = 'none';
+    const r = activeReel;
+    setTimeout(() => {
+      if (r && r.onDeath) showEndCard(r.onDeath(score));
+      else if (r && r.end) showEndCard(r.end);
+      else backToMenu();
+    }, 900);
+  }
+
+  // ---------- Update ----------
+  function update(rawDt) {
+    // slow-mo handling (reel 3)
+    if (slowMoTimer > 0) {
+      slowMoTimer -= rawDt;
+      timeScale = slowMoTimer > 0 ? 0.22 : 1;
+    }
+    const dt = rawDt * timeScale;
+
+    for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.98; p.vy *= 0.98; }
+    particles = particles.filter(p => p.t < p.life);
+    for (const b of beams) b.t += dt;
+    beams = beams.filter(b => b.t < b.life);
+    for (const r of ripples) r.t += dt;
+    ripples = ripples.filter(r => r.t < r.life);
+    if (shake > 0) shake = Math.max(0, shake - rawDt * 40);
+
+    if (state !== 'playing') return;
+
+    runTime += rawDt; // overlay timing uses real time, not slow-mo time
+    updateOverlays();
+
+    // Reel 1 auto-ends on the title card
+    if (activeReel && activeReel.autoEndAt && runTime >= activeReel.autoEndAt) {
+      state = 'dead';
+      showEndCard(activeReel.end);
+      hud.style.display = 'none';
+      return;
+    }
+
+    elapsed += dt;
+    difficulty = Math.min(8, elapsed / 10);
+    if (swapCooldown > 0) swapCooldown -= dt;
+    if (player.pulse > 0) player.pulse -= dt * 3;
+
+    spawnTimerShard -= dt;
+    if (spawnTimerShard <= 0 && shards.length < 4) {
+      spawnShard();
+      spawnTimerShard = rand(1.5, 3);
+    }
+
+    spawnTimerSeeker -= dt;
+    const maxSeekers = 3 + Math.floor(difficulty);
+    if (spawnTimerSeeker <= 0 && seekers.length < maxSeekers) {
+      spawnSeeker();
+      spawnTimerSeeker = Math.max(0.9, 2.2 - difficulty * 0.2);
+    }
+
+    for (const s of shards) { s.t += dt; s.spin += dt * 2; }
+    shards = shards.filter(s => s.t < s.life);
+
+    for (const s of seekers) {
+      const targetA = Math.atan2(player.y - s.y, player.x - s.x);
+      let dA = targetA - s.angle;
+      while (dA > Math.PI) dA -= Math.PI * 2;
+      while (dA < -Math.PI) dA += Math.PI * 2;
+      s.angle += dA * Math.min(1, s.turn * dt);
+      s.wobble += dt * 5;
+      const a = s.angle + Math.sin(s.wobble) * 0.15;
+      s.x += Math.cos(a) * s.speed * dt;
+      s.y += Math.sin(a) * s.speed * dt;
+    }
+
+    for (let i = 0; i < seekers.length; i++) {
+      for (let j = i + 1; j < seekers.length; j++) {
+        const a = seekers[i], b = seekers[j];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < SEEKER_R * 2) {
+          burst((a.x + b.x) / 2, (a.y + b.y) / 2, CORAL, 26, 380);
+          burst((a.x + b.x) / 2, (a.y + b.y) / 2, GOLD, 12, 250);
+          seekers.splice(j, 1); seekers.splice(i, 1);
+          score += 10; kills++;
+          shake = 8;
+          hud.textContent = score;
+          if (activeReel && activeReel.slowMoOnCrash) slowMoTimer = 1.3;
+          i--; break;
+        }
+      }
+    }
+
+    for (const s of seekers) {
+      if (Math.hypot(s.x - player.x, s.y - player.y) < SEEKER_R + PLAYER_R - 3) {
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  // ---------- Draw ----------
+  function drawGrid() {
+    ctx.strokeStyle = 'rgba(53, 240, 200, 0.05)';
+    ctx.lineWidth = 1;
+    const gap = 60;
+    for (let x = gap; x < W; x += gap) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = gap; y < H; y += gap) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake) * 0.4, rand(-shake, shake) * 0.4);
+    ctx.fillStyle = INK;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    drawGrid();
+
+    for (const r of ripples) {
+      const k = r.t / r.life;
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 10 + k * 55, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const b of beams) {
+      const k = b.t / b.life;
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = 3.5 * (1 - k) + 1;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.moveTo(b.x1, b.y1);
+      ctx.lineTo(b.x2, b.y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+
+    for (const s of shards) {
+      const fade = s.life - s.t < 1.5 ? (Math.sin(s.t * 12) * 0.3 + 0.6) : 1;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.spin);
+      ctx.globalAlpha = fade;
+      ctx.shadowColor = TEAL; ctx.shadowBlur = 14;
+      ctx.fillStyle = TEAL;
+      ctx.beginPath();
+      ctx.moveTo(0, -SHARD_R);
+      ctx.lineTo(SHARD_R * 0.7, 0);
+      ctx.lineTo(0, SHARD_R);
+      ctx.lineTo(-SHARD_R * 0.7, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const s of seekers) {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.angle);
+      ctx.shadowColor = CORAL; ctx.shadowBlur = 12;
+      ctx.fillStyle = CORAL;
+      ctx.beginPath();
+      ctx.moveTo(SEEKER_R + 3, 0);
+      ctx.lineTo(-SEEKER_R * 0.8, SEEKER_R * 0.8);
+      ctx.lineTo(-SEEKER_R * 0.3, 0);
+      ctx.lineTo(-SEEKER_R * 0.8, -SEEKER_R * 0.8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.shadowBlur = 0;
+
+    if (state === 'playing' || state === 'countdown') {
+      const px = player.x, py = player.y;
+      const pulseR = PLAYER_R + 6 + Math.sin(performance.now() / 300) * 2 + player.pulse * 10;
+      ctx.strokeStyle = 'rgba(234, 246, 255, 0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      const cdFrac = swapCooldown > 0 ? 1 - swapCooldown / SWAP_COOLDOWN : 1;
+      ctx.arc(px, py, pulseR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * cdFrac);
+      ctx.stroke();
+      ctx.shadowColor = '#eaf6ff'; ctx.shadowBlur = 20;
+      ctx.fillStyle = '#eaf6ff';
+      ctx.beginPath();
+      ctx.arc(px, py, PLAYER_R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = INK;
+      ctx.beginPath();
+      ctx.arc(px, py, PLAYER_R * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const p of particles) {
+      ctx.globalAlpha = 1 - p.t / p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function loop(t) {
+    const dt = Math.min((t - lastTime) / 1000, 0.033);
+    lastTime = t;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  reset();
+  requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>

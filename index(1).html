@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SWAP OUT — the one-tap game where you can't move</title>
+<meta name="description" content="SWAP OUT: you can't move. Trade places with anything on screen to survive. Free to play.">
+
+<!-- ============================================================
+     STEP 1 OF 2: ADSENSE
+     When Google AdSense approves you, they give you a script tag
+     that looks like the line below. Delete the comment markers
+     and replace ca-pub-XXXXXXXXXXXXXXXX with YOUR publisher ID.
+     ============================================================ -->
+<!--
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX" crossorigin="anonymous"></script>
+-->
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #071019; touch-action: manipulation; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  #game { display: block; width: 100vw; height: 100vh; }
+  .overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    background: rgba(7, 16, 25, 0.86); backdrop-filter: blur(5px);
+    color: #eaf6ff; text-align: center; z-index: 10; padding: 20px;
+    transition: opacity 0.25s ease;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; }
+  .title {
+    font-size: clamp(40px, 10vw, 74px); font-weight: 900; letter-spacing: 4px;
+    color: #35f0c8;
+  }
+  .title span { color: #ff7a59; }
+  .rules { color: #9db4c8; font-size: 14px; line-height: 1.65; max-width: 320px; }
+  .rules b { color: #eaf6ff; }
+  .rules .safe { color: #35f0c8; font-weight: 700; }
+  .rules .danger { color: #ff7a59; font-weight: 700; }
+  .btn {
+    background: #35f0c8; color: #071019; border: none; border-radius: 40px;
+    padding: 14px 48px; font-size: 17px; font-weight: 800; cursor: pointer;
+    letter-spacing: 2px; transition: transform 0.12s ease;
+  }
+  .btn:active { transform: scale(0.94); }
+  .btn-remove-ads {
+    background: transparent; color: #ffd166; border: 1.5px solid #ffd166;
+    border-radius: 40px; padding: 9px 24px; font-size: 13px; font-weight: 700;
+    cursor: pointer; letter-spacing: 1px;
+  }
+  .btn-remove-ads:active { transform: scale(0.95); }
+  .score-big { font-size: 58px; font-weight: 900; color: #35f0c8; }
+  .score-label { color: #9db4c8; font-size: 13px; text-transform: uppercase; letter-spacing: 3px; margin-bottom: -10px; }
+  .best { color: #ff7a59; font-size: 15px; font-weight: 700; }
+  .stat-row { display: flex; gap: 24px; color: #9db4c8; font-size: 13px; }
+  .stat-row b { color: #eaf6ff; display: block; font-size: 20px; }
+  #hud {
+    position: fixed; top: 18px; left: 0; right: 0; text-align: center;
+    color: #eaf6ff; font-size: 40px; font-weight: 900; z-index: 5;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.6); pointer-events: none; display: none;
+  }
+  #combo {
+    position: fixed; top: 66px; left: 0; right: 0; text-align: center;
+    color: #ff7a59; font-size: 16px; font-weight: 800; letter-spacing: 2px;
+    z-index: 5; pointer-events: none; opacity: 0; transition: opacity 0.3s;
+  }
+  /* Ad containers */
+  .ad-slot {
+    width: min(336px, 90vw); min-height: 90px; max-height: 110px;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; border-radius: 8px;
+  }
+  .ad-slot.hidden-ads { display: none; }
+  .ad-placeholder {
+    width: 100%; height: 90px; border: 1px dashed rgba(157, 180, 200, 0.35);
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    color: rgba(157, 180, 200, 0.5); font-size: 12px; letter-spacing: 1px;
+  }
+  .unlock-note { color: #ffd166; font-size: 12px; letter-spacing: 1px; }
+  /* Full-screen ad break */
+  #adBreak {
+    position: fixed; inset: 0; z-index: 20; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; background: #071019; color: #eaf6ff; text-align: center; padding: 24px;
+  }
+  #adBreak .ad-fullslot {
+    width: min(360px, 92vw); height: min(480px, 55vh);
+    display: flex; align-items: center; justify-content: center;
+    border: 1px dashed rgba(157, 180, 200, 0.35); border-radius: 12px;
+    color: rgba(157, 180, 200, 0.5); font-size: 13px; letter-spacing: 1px;
+  }
+  #adBreak .small-label { color: #9db4c8; font-size: 11px; text-transform: uppercase; letter-spacing: 3px; }
+  #continueBtn {
+    background: transparent; color: #9db4c8; border: 1.5px solid rgba(157,180,200,0.5);
+    border-radius: 40px; padding: 11px 36px; font-size: 14px; font-weight: 700;
+    cursor: pointer; letter-spacing: 1px; min-width: 190px;
+  }
+  #continueBtn:disabled { opacity: 0.45; cursor: default; }
+  #adBreak .btn-remove-ads { font-size: 15px; padding: 12px 32px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">0</div>
+<div id="combo"></div>
+<button id="muteBtn" title="Sound on/off" style="position:fixed;top:14px;right:14px;z-index:12;background:rgba(7,16,25,0.6);border:1.5px solid rgba(157,180,200,0.4);color:#eaf6ff;border-radius:50%;width:42px;height:42px;font-size:18px;cursor:pointer;">🔊</button>
+
+<div class="overlay" id="startScreen">
+  <div class="title">SWAP<span>OUT</span></div>
+  <div class="rules">
+    You <b>cannot move</b>. Your only power is to <b>trade places</b> with anything on screen — just tap it.<br><br>
+    Swap with a <span class="safe">shard</span> to score and escape.
+    Swap with a <span class="danger">seeker</span> to teleport into its spot — it lands in yours.
+    Seekers that crash into each other <b>explode for bonus points</b>.
+  </div>
+  <button class="btn" id="startBtn">SWAP IN</button>
+
+  <!-- Menu banner ad -->
+  <div class="ad-slot" id="adMenu">
+    <div class="ad-placeholder">AD SPACE — appears when AdSense is connected</div>
+    <!-- When AdSense approves you, replace the placeholder div above with
+         the "display ad" <ins> unit code AdSense gives you. -->
+  </div>
+  <button class="btn-remove-ads" id="removeAdsBtn1">REMOVE ADS — $2.99</button>
+</div>
+
+<div class="overlay hidden" id="gameOverScreen">
+  <div class="score-label">Swapped out</div>
+  <div class="score-big" id="finalScore">0</div>
+  <div class="stat-row">
+    <div><b id="statSwaps">0</b>swaps</div>
+    <div><b id="statKills">0</b>collisions</div>
+    <div><b id="statTime">0s</b>survived</div>
+  </div>
+  <div class="best" id="bestScore">Best: 0</div>
+
+  <!-- Game-over ad (highest-earning spot) -->
+  <div class="ad-slot" id="adGameOver">
+    <div class="ad-placeholder">AD SPACE — appears when AdSense is connected</div>
+    <!-- Replace placeholder with your AdSense <ins> unit code here too. -->
+  </div>
+
+  <button class="btn" id="retryBtn">SWAP IN AGAIN</button>
+  <button class="btn-remove-ads" id="removeAdsBtn2">REMOVE ADS — $2.99</button>
+</div>
+
+<!-- Full-screen ad break (shows between rounds for free players) -->
+<div id="adBreak">
+  <div class="small-label">Ad break</div>
+  <div class="ad-fullslot" id="adFullSlot">FULL-SCREEN AD — appears when AdSense is connected</div>
+  <button class="btn-remove-ads" id="removeAdsBtn3">✕ REMOVE ADS FOREVER — $2.99</button>
+  <button id="continueBtn" disabled>CONTINUE IN 3</button>
+</div>
+
+<script>
+(() => {
+  // ============================================================
+  // STEP 2 OF 2: STRIPE
+  // Create your $2.99 Payment Link in the Stripe dashboard and
+  // paste it between the quotes below. In the Payment Link's
+  // settings, set "After payment" to redirect to:
+  //    https://YOUR-SITE-URL/?unlocked=true
+  // ============================================================
+  const STRIPE_PAYMENT_LINK = "PASTE_YOUR_STRIPE_LINK_HERE";
+
+  // ---------- Ad-free unlock logic ----------
+  const UNLOCK_KEY = 'swapout_adfree';
+
+  function storageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function storageSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  // Returning from Stripe with ?unlocked=true -> save it forever on this device
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('unlocked') === 'true') {
+    storageSet(UNLOCK_KEY, 'yes');
+    // clean the URL so refreshes look normal
+    try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+  }
+
+  const adFree = storageGet(UNLOCK_KEY) === 'yes';
+
+  function applyAdState() {
+    const slots = [document.getElementById('adMenu'), document.getElementById('adGameOver')];
+    const buttons = [document.getElementById('removeAdsBtn1'), document.getElementById('removeAdsBtn2')];
+    if (adFree) {
+      slots.forEach(s => s.classList.add('hidden-ads'));
+      buttons.forEach(b => {
+        b.textContent = 'AD-FREE ✓ THANK YOU';
+        b.disabled = true;
+        b.style.opacity = 0.7;
+        b.style.cursor = 'default';
+      });
+    }
+  }
+  applyAdState();
+
+  function openCheckout() {
+    if (STRIPE_PAYMENT_LINK.startsWith('http')) {
+      window.location.href = STRIPE_PAYMENT_LINK;
+    } else {
+      alert('Payment link not set up yet — paste your Stripe Payment Link into the code (STEP 2 marker).');
+    }
+  }
+  document.getElementById('removeAdsBtn1').addEventListener('click', () => { if (!adFree) openCheckout(); });
+  document.getElementById('removeAdsBtn2').addEventListener('click', () => { if (!adFree) openCheckout(); });
+  document.getElementById('removeAdsBtn3').addEventListener('click', () => { if (!adFree) openCheckout(); });
+
+  // ============================================================
+  // FULL-SCREEN AD BREAKS (interstitials)
+  // Shows every 2nd retry for free players, never for paid ones.
+  // When AdSense approves you, use their "Ad Placement API for
+  // H5 games" script (they call it adBreak) — paste it in the
+  // head next to your main AdSense tag. If adBreak exists, real
+  // Google interstitials are used automatically; until then, a
+  // placeholder screen with the countdown shows instead.
+  // ============================================================
+  const AD_EVERY_N_RETRIES = 2;      // every 2nd game
+  const MIN_SECONDS_BETWEEN_ADS = 30; // never more often than this
+  let retryCount = 0;
+  let lastAdAt = 0;
+
+  const adBreakEl = document.getElementById('adBreak');
+  const continueBtn = document.getElementById('continueBtn');
+
+  function shouldShowAd() {
+    if (adFree) return false;
+    if (retryCount % AD_EVERY_N_RETRIES !== 0) return false;
+    if ((Date.now() - lastAdAt) / 1000 < MIN_SECONDS_BETWEEN_ADS) return false;
+    return true;
+  }
+
+  function showAdBreak(onDone) {
+    lastAdAt = Date.now();
+    // Real Google interstitial if the H5 Games API is loaded
+    if (typeof window.adBreak === 'function') {
+      window.adBreak({
+        type: 'next',
+        name: 'between-rounds',
+        adBreakDone: () => onDone()
+      });
+      return;
+    }
+    // Placeholder interstitial with a 3-second countdown
+    adBreakEl.style.display = 'flex';
+    let n = 3;
+    continueBtn.disabled = true;
+    continueBtn.textContent = 'CONTINUE IN ' + n;
+    const iv = setInterval(() => {
+      n--;
+      if (n > 0) {
+        continueBtn.textContent = 'CONTINUE IN ' + n;
+      } else {
+        clearInterval(iv);
+        continueBtn.disabled = false;
+        continueBtn.textContent = 'CONTINUE ▶';
+      }
+    }, 1000);
+    continueBtn.onclick = () => {
+      if (continueBtn.disabled) return;
+      adBreakEl.style.display = 'none';
+      onDone();
+    };
+  }
+
+  // ============================================================
+  // ADAPTIVE AUDIO ENGINE
+  // No music files — everything is synthesised live so the
+  // soundtrack tracks the game: tempo, layers and brightness all
+  // rise with difficulty. Nothing to license, nothing to load.
+  // ============================================================
+  const audio = (() => {
+    let ac = null, musicGain, sfxGain, filter;
+    let muted = storageGet('swapout_muted') === 'yes';
+    let playing = false, schedTimer = null;
+    let nextNoteTime = 0, step = 0;
+    let intensity = 0; // 0..1, fed from game difficulty
+
+    const muteBtn = document.getElementById('muteBtn');
+    muteBtn.textContent = muted ? '🔇' : '🔊';
+    muteBtn.addEventListener('click', () => {
+      muted = !muted;
+      storageSet('swapout_muted', muted ? 'yes' : 'no');
+      muteBtn.textContent = muted ? '🔇' : '🔊';
+      if (ac) {
+        musicGain.gain.setTargetAtTime(muted ? 0 : 0.5, ac.currentTime, 0.05);
+        sfxGain.gain.setTargetAtTime(muted ? 0 : 0.7, ac.currentTime, 0.05);
+      }
+    });
+
+    function ensureCtx() {
+      if (ac) return;
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      musicGain = ac.createGain();
+      sfxGain = ac.createGain();
+      filter = ac.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 500;
+      musicGain.gain.value = muted ? 0 : 0.5;
+      sfxGain.gain.value = muted ? 0 : 0.7;
+      musicGain.connect(filter);
+      filter.connect(ac.destination);
+      sfxGain.connect(ac.destination);
+    }
+
+    // ---- tiny synth voices ----
+    function tone(freq, t, dur, type, vol, dest, slideTo) {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, t);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g); g.connect(dest);
+      o.start(t); o.stop(t + dur + 0.02);
+    }
+    function noise(t, dur, vol, dest, cutoff) {
+      const len = Math.max(1, Math.floor(ac.sampleRate * dur));
+      const buf = ac.createBuffer(1, len, ac.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = ac.createBufferSource(); src.buffer = buf;
+      const g = ac.createGain(); g.gain.value = vol;
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff || 8000;
+      src.connect(f); f.connect(g); g.connect(dest);
+      src.start(t);
+    }
+
+    // ---- adaptive sequencer (16th-note grid, A minor) ----
+    const BASS = [55, 55, 65.4, 55, 49, 49, 55, 43.65];       // A1 C2 G1 F1 riff
+    const ARP = [220, 261.6, 329.6, 392, 329.6, 261.6];        // Am pentatonic climb
+    function scheduleStep(t) {
+      const bpm = 100 + intensity * 44;                         // 100 -> 144 bpm
+      const spb = 60 / bpm / 4;                                 // seconds per 16th
+      const s16 = step % 16;
+
+      // kick: four on the floor
+      if (s16 % 4 === 0) tone(120, t, 0.12, 'sine', 0.9, musicGain, 40);
+      // bass riff on 8ths
+      if (s16 % 2 === 0) tone(BASS[(step >> 1) % 8], t, spb * 1.8, 'sawtooth', 0.22, musicGain);
+      // hats: offbeats early, every 16th when intense
+      if ((intensity > 0.5 ? true : s16 % 2 === 1)) noise(t, 0.03, 0.08 + intensity * 0.06, musicGain);
+      // arp layer fades in from mid intensity
+      if (intensity > 0.25) {
+        const v = 0.05 + (intensity - 0.25) * 0.18;
+        tone(ARP[step % 6] * (intensity > 0.75 && s16 % 8 >= 4 ? 2 : 1), t, spb * 1.2, 'square', v, musicGain);
+      }
+      // filter opens with intensity
+      filter.frequency.setTargetAtTime(500 + intensity * 3500, t, 0.2);
+
+      step++;
+      return spb;
+    }
+    function scheduler() {
+      while (nextNoteTime < ac.currentTime + 0.12) {
+        nextNoteTime += scheduleStep(nextNoteTime);
+      }
+    }
+
+    return {
+      start() {
+        ensureCtx();
+        if (ac.state === 'suspended') ac.resume();
+        if (playing) return;
+        playing = true;
+        step = 0; intensity = 0;
+        nextNoteTime = ac.currentTime + 0.06;
+        schedTimer = setInterval(scheduler, 30);
+      },
+      stop() {
+        playing = false;
+        if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
+      },
+      setIntensity(v) { intensity = Math.max(0, Math.min(1, v)); },
+      // ---- SFX ----
+      swap() { if (!ac) return; const t = ac.currentTime; tone(300, t, 0.12, 'sine', 0.5, sfxGain, 900); },
+      shard() { if (!ac) return; const t = ac.currentTime; tone(880, t, 0.07, 'square', 0.25, sfxGain); tone(1320, t + 0.07, 0.09, 'square', 0.25, sfxGain); },
+      crash() { if (!ac) return; const t = ac.currentTime; noise(t, 0.35, 0.8, sfxGain, 2500); tone(140, t, 0.4, 'sine', 0.9, sfxGain, 35); },
+      death() {
+        if (!ac) return; const t = ac.currentTime;
+        tone(400, t, 0.7, 'sawtooth', 0.5, sfxGain, 55);
+        noise(t, 0.5, 0.6, sfxGain, 1800);
+        this.stop();
+      }
+    };
+  })();
+
+  // ---------- Game ----------
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const hud = document.getElementById('hud');
+  const comboEl = document.getElementById('combo');
+  const startScreen = document.getElementById('startScreen');
+  const gameOverScreen = document.getElementById('gameOverScreen');
+
+  const TEAL = '#35f0c8', CORAL = '#ff7a59', INK = '#071019', GOLD = '#ffd166';
+
+  let W, H, DPR;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function rand(a, b) { return a + Math.random() * (b - a); }
+
+  let state = 'menu';
+  let player, shards, seekers, particles, beams, ripples;
+  let score, best = 0, swaps, kills, elapsed;
+  let swapCooldown, spawnTimerShard, spawnTimerSeeker, difficulty;
+  let shake = 0, lastTime = 0, comboTimer = 0;
+
+  // persistent best score on the player's device
+  best = parseInt(storageGet('swapout_best') || '0', 10) || 0;
+
+  const PLAYER_R = 13;
+  const SHARD_R = 10;
+  const SEEKER_R = 12;
+  const SWAP_COOLDOWN = 0.45;
+  const TAP_RADIUS = 55;
+
+  function reset() {
+    player = { x: W / 2, y: H / 2, pulse: 0 };
+    shards = []; seekers = []; particles = []; beams = []; ripples = [];
+    score = 0; swaps = 0; kills = 0; elapsed = 0;
+    swapCooldown = 0; difficulty = 0;
+    spawnTimerShard = 0.5; spawnTimerSeeker = 2.2;
+    hud.textContent = '0';
+    spawnShard(); spawnShard();
+  }
+
+  function safeSpawnPos(minDistFromPlayer) {
+    let x, y, tries = 0;
+    do {
+      x = rand(40, W - 40); y = rand(70, H - 40);
+      tries++;
+    } while (Math.hypot(x - player.x, y - player.y) < minDistFromPlayer && tries < 20);
+    return { x, y };
+  }
+
+  function spawnShard() {
+    const p = safeSpawnPos(90);
+    shards.push({ x: p.x, y: p.y, life: rand(6, 9), t: 0, spin: Math.random() * Math.PI * 2 });
+  }
+
+  function spawnSeeker() {
+    const side = Math.floor(rand(0, 4));
+    let x, y;
+    if (side === 0) { x = -20; y = rand(0, H); }
+    else if (side === 1) { x = W + 20; y = rand(0, H); }
+    else if (side === 2) { x = rand(0, W); y = -20; }
+    else { x = rand(0, W); y = H + 20; }
+    seekers.push({
+      x, y, vx: 0, vy: 0,
+      speed: rand(55, 75) + difficulty * 7,
+      turn: rand(1.2, 2.0),
+      angle: Math.atan2(player.y - y, player.x - x),
+      wobble: Math.random() * Math.PI * 2
+    });
+  }
+
+  function burst(x, y, color, n, spd = 300) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = rand(spd * 0.3, spd);
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: 0, life: rand(0.35, 0.8), color, r: rand(2, 4.5) });
+    }
+  }
+
+  function addBeam(x1, y1, x2, y2, color) {
+    beams.push({ x1, y1, x2, y2, t: 0, life: 0.28, color });
+  }
+
+  function addRipple(x, y, color) {
+    ripples.push({ x, y, t: 0, life: 0.5, color });
+  }
+
+  function showCombo(text) {
+    comboEl.textContent = text;
+    comboEl.style.opacity = 1;
+    comboTimer = 1.1;
+  }
+
+  function doSwap(target, list) {
+    const px = player.x, py = player.y;
+    addBeam(px, py, target.x, target.y, TEAL);
+    addRipple(px, py, CORAL);
+    addRipple(target.x, target.y, TEAL);
+
+    player.x = target.x; player.y = target.y;
+    player.pulse = 1;
+
+    if (list === shards) {
+      shards.splice(shards.indexOf(target), 1);
+      score += 3;
+      burst(px, py, TEAL, 12);
+      audio.shard();
+      spawnShard();
+    } else {
+      target.x = px; target.y = py;
+      target.angle = Math.atan2(player.y - target.y, player.x - target.x);
+      score += 1;
+      burst(target.x, target.y, CORAL, 8, 180);
+      audio.swap();
+    }
+    swaps++;
+    swapCooldown = SWAP_COOLDOWN;
+    hud.textContent = score;
+  }
+
+  function handleTap(x, y) {
+    if (state !== 'playing' || swapCooldown > 0) return;
+    let bestT = null, bestD = TAP_RADIUS, bestList = null;
+    for (const s of shards) {
+      const d = Math.hypot(x - s.x, y - s.y);
+      if (d < bestD) { bestD = d; bestT = s; bestList = shards; }
+    }
+    for (const s of seekers) {
+      const d = Math.hypot(x - s.x, y - s.y);
+      if (d < bestD) { bestD = d; bestT = s; bestList = seekers; }
+    }
+    if (bestT) doSwap(bestT, bestList);
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    handleTap(e.clientX, e.clientY);
+  });
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('retryBtn').addEventListener('click', () => {
+    retryCount++;
+    if (shouldShowAd()) showAdBreak(startGame);
+    else startGame();
+  });
+
+  function startGame() {
+    reset();
+    state = 'playing';
+    startScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    hud.style.display = 'block';
+    audio.start();
+  }
+
+  function gameOver() {
+    state = 'dead';
+    audio.death();
+    burst(player.x, player.y, TEAL, 50, 450);
+    shake = 14;
+    if (score > best) {
+      best = score;
+      storageSet('swapout_best', String(best));
+    }
+    setTimeout(() => {
+      hud.style.display = 'none';
+      comboEl.style.opacity = 0;
+      document.getElementById('finalScore').textContent = score;
+      document.getElementById('statSwaps').textContent = swaps;
+      document.getElementById('statKills').textContent = kills;
+      document.getElementById('statTime').textContent = Math.floor(elapsed) + 's';
+      document.getElementById('bestScore').textContent = 'Best: ' + best;
+      gameOverScreen.classList.remove('hidden');
+      // Refresh the game-over ad if AdSense is live and player hasn't paid
+      if (!adFree && window.adsbygoogle) {
+        try { (adsbygoogle = window.adsbygoogle || []).push({}); } catch (e) {}
+      }
+    }, 750);
+  }
+
+  function update(dt) {
+    for (const p of particles) { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.98; p.vy *= 0.98; }
+    particles = particles.filter(p => p.t < p.life);
+    for (const b of beams) b.t += dt;
+    beams = beams.filter(b => b.t < b.life);
+    for (const r of ripples) r.t += dt;
+    ripples = ripples.filter(r => r.t < r.life);
+    if (shake > 0) shake = Math.max(0, shake - dt * 40);
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) comboEl.style.opacity = 0; }
+
+    if (state !== 'playing') return;
+
+    elapsed += dt;
+    difficulty = Math.min(8, elapsed / 12);
+    audio.setIntensity(difficulty / 8);
+    if (swapCooldown > 0) swapCooldown -= dt;
+    if (player.pulse > 0) player.pulse -= dt * 3;
+
+    spawnTimerShard -= dt;
+    if (spawnTimerShard <= 0 && shards.length < 4) {
+      spawnShard();
+      spawnTimerShard = rand(1.5, 3);
+    }
+
+    spawnTimerSeeker -= dt;
+    const maxSeekers = 3 + Math.floor(difficulty);
+    if (spawnTimerSeeker <= 0 && seekers.length < maxSeekers) {
+      spawnSeeker();
+      spawnTimerSeeker = Math.max(0.9, 2.6 - difficulty * 0.22);
+    }
+
+    for (const s of shards) { s.t += dt; s.spin += dt * 2; }
+    shards = shards.filter(s => s.t < s.life);
+
+    for (const s of seekers) {
+      const targetA = Math.atan2(player.y - s.y, player.x - s.x);
+      let dA = targetA - s.angle;
+      while (dA > Math.PI) dA -= Math.PI * 2;
+      while (dA < -Math.PI) dA += Math.PI * 2;
+      s.angle += dA * Math.min(1, s.turn * dt);
+      s.wobble += dt * 5;
+      const a = s.angle + Math.sin(s.wobble) * 0.15;
+      s.x += Math.cos(a) * s.speed * dt;
+      s.y += Math.sin(a) * s.speed * dt;
+    }
+
+    for (let i = 0; i < seekers.length; i++) {
+      for (let j = i + 1; j < seekers.length; j++) {
+        const a = seekers[i], b = seekers[j];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < SEEKER_R * 2) {
+          burst((a.x + b.x) / 2, (a.y + b.y) / 2, CORAL, 26, 380);
+          burst((a.x + b.x) / 2, (a.y + b.y) / 2, GOLD, 12, 250);
+          seekers.splice(j, 1); seekers.splice(i, 1);
+          score += 10; kills++;
+          shake = 8;
+          audio.crash();
+          showCombo('CRASH +10');
+          hud.textContent = score;
+          i--; break;
+        }
+      }
+    }
+
+    for (const s of seekers) {
+      if (Math.hypot(s.x - player.x, s.y - player.y) < SEEKER_R + PLAYER_R - 3) {
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  function drawGrid() {
+    ctx.strokeStyle = 'rgba(53, 240, 200, 0.05)';
+    ctx.lineWidth = 1;
+    const gap = 60;
+    for (let x = gap; x < W; x += gap) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = gap; y < H; y += gap) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+  }
+
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate(rand(-shake, shake) * 0.4, rand(-shake, shake) * 0.4);
+
+    ctx.fillStyle = INK;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    drawGrid();
+
+    for (const r of ripples) {
+      const k = r.t / r.life;
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 10 + k * 55, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const b of beams) {
+      const k = b.t / b.life;
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = 3.5 * (1 - k) + 1;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.moveTo(b.x1, b.y1);
+      ctx.lineTo(b.x2, b.y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+
+    for (const s of shards) {
+      const fade = s.life - s.t < 1.5 ? (Math.sin(s.t * 12) * 0.3 + 0.6) : 1;
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.spin);
+      ctx.globalAlpha = fade;
+      ctx.shadowColor = TEAL; ctx.shadowBlur = 14;
+      ctx.fillStyle = TEAL;
+      ctx.beginPath();
+      ctx.moveTo(0, -SHARD_R);
+      ctx.lineTo(SHARD_R * 0.7, 0);
+      ctx.lineTo(0, SHARD_R);
+      ctx.lineTo(-SHARD_R * 0.7, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const s of seekers) {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.angle);
+      ctx.shadowColor = CORAL; ctx.shadowBlur = 12;
+      ctx.fillStyle = CORAL;
+      ctx.beginPath();
+      ctx.moveTo(SEEKER_R + 3, 0);
+      ctx.lineTo(-SEEKER_R * 0.8, SEEKER_R * 0.8);
+      ctx.lineTo(-SEEKER_R * 0.3, 0);
+      ctx.lineTo(-SEEKER_R * 0.8, -SEEKER_R * 0.8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.shadowBlur = 0;
+
+    if (state !== 'dead') {
+      const px = player.x, py = player.y;
+      const pulseR = PLAYER_R + 6 + Math.sin(performance.now() / 300) * 2 + player.pulse * 10;
+      ctx.strokeStyle = 'rgba(234, 246, 255, 0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      const cdFrac = swapCooldown > 0 ? 1 - swapCooldown / SWAP_COOLDOWN : 1;
+      ctx.arc(px, py, pulseR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * cdFrac);
+      ctx.stroke();
+
+      ctx.shadowColor = '#eaf6ff'; ctx.shadowBlur = 20;
+      ctx.fillStyle = '#eaf6ff';
+      ctx.beginPath();
+      ctx.arc(px, py, PLAYER_R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = INK;
+      ctx.beginPath();
+      ctx.arc(px, py, PLAYER_R * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const p of particles) {
+      ctx.globalAlpha = 1 - p.t / p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+  }
+
+  function loop(t) {
+    const dt = Math.min((t - lastTime) / 1000, 0.033);
+    lastTime = t;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  reset();
+  requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>
