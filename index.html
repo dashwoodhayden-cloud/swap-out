@@ -527,11 +527,96 @@
   }
   refreshDailyUI();
 
+  // ---- Shareable score card: a 1080x1920 Story-ready image drawn on the fly ----
+  function drawScoreCard() {
+    const d = loadDaily(), st = loadStreak();
+    const c = document.createElement('canvas');
+    c.width = 1080; c.height = 1920;
+    const g = c.getContext('2d');
+
+    // ink background + faint grid
+    g.fillStyle = INK; g.fillRect(0, 0, 1080, 1920);
+    g.strokeStyle = 'rgba(53,240,200,0.06)'; g.lineWidth = 2;
+    for (let x = 90; x < 1080; x += 90) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 1920); g.stroke(); }
+    for (let y = 90; y < 1920; y += 90) { g.beginPath(); g.moveTo(0, y); g.lineTo(1080, y); g.stroke(); }
+
+    // brand symbol: swap arrows around the frozen dot
+    const cx = 540, cy = 430, R = 170;
+    g.lineCap = 'round'; g.lineWidth = 52;
+    g.strokeStyle = TEAL;
+    g.beginPath(); g.arc(cx, cy, R, Math.PI * 1.17, Math.PI * 1.83); g.stroke();
+    g.strokeStyle = CORAL;
+    g.beginPath(); g.arc(cx, cy, R, Math.PI * 0.17, Math.PI * 0.83); g.stroke();
+    // arrowheads
+    function head(ax, ay, ang, col) {
+      g.save(); g.translate(ax, ay); g.rotate(ang); g.fillStyle = col;
+      g.beginPath(); g.moveTo(-6, -40); g.lineTo(-6, 40); g.lineTo(62, 0); g.closePath(); g.fill(); g.restore();
+    }
+    head(cx + R * Math.cos(Math.PI * 1.83), cy + R * Math.sin(Math.PI * 1.83), Math.PI * 0.33, TEAL);
+    head(cx + R * Math.cos(Math.PI * 0.83), cy + R * Math.sin(Math.PI * 0.83), Math.PI * 1.33, CORAL);
+    // frozen player
+    g.shadowColor = '#eaf6ff'; g.shadowBlur = 40;
+    g.fillStyle = '#eaf6ff'; g.beginPath(); g.arc(cx, cy, 66, 0, Math.PI * 2); g.fill();
+    g.shadowBlur = 0;
+    g.fillStyle = INK; g.beginPath(); g.arc(cx, cy, 29, 0, Math.PI * 2); g.fill();
+
+    // challenge label
+    g.textAlign = 'center';
+    g.fillStyle = '#9db4c8';
+    g.font = '700 52px sans-serif';
+    g.fillText('D A I L Y   C H A L L E N G E   # ' + challengeNumber(), 540, 780);
+
+    // the score, huge with teal glow
+    g.shadowColor = TEAL; g.shadowBlur = 60;
+    g.fillStyle = '#ffffff';
+    g.font = '900 380px sans-serif';
+    g.fillText(String(d.best || 0), 540, 1160);
+    g.shadowBlur = 0;
+
+    g.fillStyle = TEAL;
+    g.font = '800 54px sans-serif';
+    g.fillText("TODAY'S BEST", 540, 1250);
+
+    if (st.count > 1) {
+      g.fillStyle = GOLD;
+      g.font = '800 58px sans-serif';
+      g.fillText(st.count + ' DAY STREAK 🔥', 540, 1360);
+    }
+
+    // wordmark + tagline + url
+    g.font = '900 110px sans-serif';
+    g.fillStyle = TEAL; g.textAlign = 'right'; g.fillText('SWAP', 540, 1600);
+    g.fillStyle = CORAL; g.textAlign = 'left'; g.fillText('OUT', 556, 1600);
+    g.textAlign = 'center';
+    g.fillStyle = '#9db4c8'; g.font = '700 40px sans-serif';
+    g.fillText("THE GAME WHERE YOU CAN'T MOVE", 540, 1675);
+    g.fillStyle = GOLD; g.font = '800 52px sans-serif';
+    g.fillText('SWAPOUT.LIVE', 540, 1780);
+
+    return c;
+  }
+
   document.getElementById('shareBtn').addEventListener('click', async () => {
     const d = loadDaily(), st = loadStreak();
     const text = 'SWAP OUT Daily #' + challengeNumber() + ' 🔁\nScore: ' + (d.best || 0)
       + (st.count > 1 ? '\nStreak: ' + st.count + '🔥' : '')
       + "\nThe game where you can't move — beat me:\nhttps://swapout.live";
+    // Try image share first (opens the share sheet with the Story-ready card)
+    try {
+      const blob = await new Promise(res => drawScoreCard().toBlob(res, 'image/png'));
+      const file = new File([blob], 'swapout-daily.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text });
+        return;
+      }
+      // No file-share support (most desktops): download the card instead
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'swapout-daily.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      return;
+    } catch (e) { /* fall through to text share */ }
     if (navigator.share) {
       try { await navigator.share({ text }); } catch (e) {}
     } else {
