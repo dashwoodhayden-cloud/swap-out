@@ -102,6 +102,10 @@
   }
   #continueBtn:disabled { opacity: 0.45; cursor: default; }
   #adBreak .btn-remove-ads { font-size: 15px; padding: 12px 32px; }
+  .purchase-note {
+    color: rgba(157, 180, 200, 0.7); font-size: 11px; line-height: 1.7; letter-spacing: 0.5px;
+  }
+  .purchase-note a { color: #9db4c8; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -127,6 +131,7 @@
          the "display ad" <ins> unit code AdSense gives you. -->
   </div>
   <button class="btn-remove-ads" id="removeAdsBtn1">REMOVE ADS — $2.99</button>
+  <div class="purchase-note" id="purchaseNote1">One-time purchase · unlocks on this device<br><a href="#" id="restoreLink1">Purchased already? Restore</a></div>
 </div>
 
 <div class="overlay hidden" id="gameOverScreen">
@@ -195,9 +200,24 @@
         b.style.opacity = 0.7;
         b.style.cursor = 'default';
       });
+      const note = document.getElementById('purchaseNote1');
+      if (note) note.style.display = 'none';
     }
   }
   applyAdState();
+
+  // Restore purchase: no accounts, so this is an honour-system restore
+  // for players who paid on another browser/device or cleared their data.
+  document.getElementById('restoreLink1').addEventListener('click', (e) => {
+    e.preventDefault();
+    if (adFree) return;
+    const ok = confirm('Restore purchase?\n\nOnly use this if you have already bought Remove Ads (on another device, another browser, or before clearing your browsing data).\n\nRestore now?');
+    if (ok) {
+      storageSet(UNLOCK_KEY, 'yes');
+      alert('Ad-free restored on this device. Thanks for supporting SWAP OUT!');
+      location.reload();
+    }
+  });
 
   function openCheckout() {
     if (STRIPE_PAYMENT_LINK.startsWith('http')) {
