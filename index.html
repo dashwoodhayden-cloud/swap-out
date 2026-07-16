@@ -15,6 +15,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#071019">
+
 <script>
   // Register the service worker (makes the game installable + playable offline)
   if ('serviceWorker' in navigator) {
@@ -116,6 +117,26 @@
     color: rgba(157, 180, 200, 0.7); font-size: 11px; line-height: 1.7; letter-spacing: 0.5px;
   }
   .purchase-note a { color: #9db4c8; text-decoration: underline; }
+  .btn-board {
+    background: rgba(255, 209, 102, 0.08); color: #ffd166; border: 1.5px solid #ffd166;
+    border-radius: 40px; padding: 10px 28px; font-size: 13px; font-weight: 800;
+    cursor: pointer; letter-spacing: 1.5px;
+  }
+  .btn-board:active { transform: scale(0.95); }
+  .lb-row {
+    display: flex; align-items: center; gap: 16px; width: min(320px, 82vw);
+    font-size: 16px; color: #eaf6ff; padding: 7px 14px; border-radius: 10px;
+  }
+  .lb-row .r { color: #9db4c8; width: 32px; text-align: right; }
+  .lb-row .n { flex: 1; text-align: left; letter-spacing: 3px; font-weight: 700; }
+  .lb-row .s { color: #35f0c8; font-weight: 800; }
+  .lb-top3 .s { color: #ffd166; }
+  #nameInput {
+    background: #0d1a2a; border: 1.5px solid #35f0c8; color: #eaf6ff;
+    font-size: 34px; letter-spacing: 14px; text-align: center; width: 210px;
+    padding: 12px 0 12px 14px; border-radius: 14px; font-weight: 800;
+    text-transform: uppercase; outline: none; font-family: inherit;
+  }
   .btn-daily {
     background: rgba(53, 240, 200, 0.08); color: #35f0c8; border: 1.5px solid #35f0c8;
     border-radius: 40px; padding: 12px 34px; font-size: 15px; font-weight: 800;
@@ -155,6 +176,7 @@
   <button class="btn" id="startBtn">SWAP IN</button>
   <button class="btn-daily" id="dailyBtn">🗓 DAILY CHALLENGE <span id="dailyNum">#1</span></button>
   <div class="daily-stats" id="dailyStats"></div>
+  <button class="btn-board" id="lbBtn">🏆 GLOBAL TOP 10</button>
 
   <!-- Menu banner ad -->
   <div class="ad-slot" id="adMenu">
@@ -177,6 +199,7 @@
   <div class="best" id="bestScore">Best: 0</div>
   <div class="daily-result" id="dailyResult" style="display:none;"></div>
   <button class="btn-share" id="shareBtn" style="display:none;">📤 SHARE MY SCORE</button>
+  <button class="btn-board" id="lbBtn2" style="display:none;">🏆 LEADERBOARD</button>
 
   <!-- Game-over ad (highest-earning spot) -->
   <div class="ad-slot" id="adGameOver">
@@ -194,6 +217,22 @@
   <div class="ad-fullslot" id="adFullSlot">FULL-SCREEN AD — appears when AdSense is connected</div>
   <button class="btn-remove-ads" id="removeAdsBtn3">✕ REMOVE ADS FOREVER — $2.99</button>
   <button id="continueBtn" disabled>CONTINUE IN 3</button>
+</div>
+
+<!-- Arcade initials entry (first daily score) -->
+<div class="overlay hidden" id="nameScreen">
+  <div class="score-label">Your arcade initials</div>
+  <input id="nameInput" maxlength="3" autocomplete="off" spellcheck="false" placeholder="AAA">
+  <button class="btn" id="nameSaveBtn">SAVE</button>
+  <div class="daily-stats">Shown on the global daily leaderboard</div>
+</div>
+
+<!-- Global daily leaderboard -->
+<div class="overlay hidden" id="lbScreen">
+  <div class="score-label" id="lbTitle">GLOBAL TOP 10</div>
+  <div id="lbList" style="display:flex;flex-direction:column;gap:4px;align-items:center;"></div>
+  <div class="daily-stats" id="lbMe"></div>
+  <button class="btn" id="lbCloseBtn">CLOSE</button>
 </div>
 
 <script>
@@ -527,6 +566,97 @@
   }
   refreshDailyUI();
 
+  // ============================================================
+  // GLOBAL LEADERBOARD (daily)
+  // Talks to /api/leaderboard — a Netlify Function backed by
+  // Netlify Blobs, deployed from the same repo as this file.
+  // ============================================================
+  let playerId = storageGet('swapout_pid');
+  if (!playerId) {
+    playerId = 'p' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    storageSet('swapout_pid', playerId);
+  }
+  let playerName = (storageGet('swapout_name') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+
+  const LB_API = '/api/leaderboard';
+  async function lbGet() {
+    const r = await fetch(LB_API + '?day=' + utcDayStr() + '&id=' + encodeURIComponent(playerId), { cache: 'no-store' });
+    if (!r.ok) throw new Error('lb get failed');
+    return r.json();
+  }
+  async function lbPost(score) {
+    const r = await fetch(LB_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: playerId, name: playerName, score })
+    });
+    if (!r.ok) throw new Error('lb post failed');
+    return r.json();
+  }
+
+  function ensureName(cb) {
+    if (playerName) { cb(); return; }
+    const ns = document.getElementById('nameScreen');
+    const input = document.getElementById('nameInput');
+    ns.classList.remove('hidden');
+    input.value = '';
+    setTimeout(() => input.focus(), 60);
+    document.getElementById('nameSaveBtn').onclick = () => {
+      const v = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+      if (!v) { input.style.borderColor = '#ff7a59'; return; }
+      playerName = v;
+      storageSet('swapout_name', v);
+      ns.classList.add('hidden');
+      cb();
+    };
+  }
+
+  async function submitDailyScore(score) {
+    try {
+      const res = await lbPost(score);
+      if (res && res.ok) {
+        const el = document.getElementById('dailyResult');
+        if (el && el.style.display !== 'none') {
+          el.textContent += ' · 🌍 World #' + res.rank + ' of ' + res.players;
+        }
+      }
+    } catch (e) { /* offline or preview — leaderboard is optional, never block the game */ }
+  }
+
+  function renderBoard(data) {
+    const list = document.getElementById('lbList');
+    list.innerHTML = '';
+    if (!data.top.length) {
+      list.innerHTML = '<div class="daily-stats">No scores yet today — be the first! 🏁</div>';
+    }
+    data.top.forEach((e, i) => {
+      const row = document.createElement('div');
+      row.className = 'lb-row' + (i < 3 ? ' lb-top3' : '');
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+      row.innerHTML = '<span class="r">' + medal + '</span><span class="n">' + e.name + '</span><span class="s">' + e.score + '</span>';
+      list.appendChild(row);
+    });
+    const me = document.getElementById('lbMe');
+    me.textContent = data.rank
+      ? 'You: #' + data.rank + ' of ' + data.players + ' — score ' + data.myScore
+      : (data.players ? data.players + ' player' + (data.players === 1 ? '' : 's') + ' so far today' : '');
+  }
+
+  async function openBoard() {
+    const s = document.getElementById('lbScreen');
+    document.getElementById('lbTitle').textContent = 'DAILY #' + challengeNumber() + ' — GLOBAL TOP 10';
+    document.getElementById('lbList').innerHTML = '<div class="daily-stats">Loading…</div>';
+    document.getElementById('lbMe').textContent = '';
+    s.classList.remove('hidden');
+    try { renderBoard(await lbGet()); }
+    catch (e) {
+      document.getElementById('lbList').innerHTML = '<div class="daily-stats">Leaderboard unavailable right now — check your connection.</div>';
+    }
+  }
+  document.getElementById('lbBtn').addEventListener('click', openBoard);
+  document.getElementById('lbBtn2').addEventListener('click', openBoard);
+  document.getElementById('lbCloseBtn').addEventListener('click', () => document.getElementById('lbScreen').classList.add('hidden'));
+
   // ---- Shareable score card: a 1080x1920 Story-ready image drawn on the fly ----
   function drawScoreCard() {
     const d = loadDaily(), st = loadStreak();
@@ -760,6 +890,8 @@
     drng = dailyMode ? mulberry32(seedFromDay()) : Math.random;
     if (dailyMode) { touchStreak(); refreshDailyUI(); }
     document.getElementById('dailyBadge').style.display = dailyMode ? 'block' : 'none';
+    document.getElementById('lbScreen').classList.add('hidden');
+    document.getElementById('nameScreen').classList.add('hidden');
     reset();
     state = 'playing';
     startScreen.classList.add('hidden');
@@ -807,11 +939,15 @@
           + (st.count > 1 ? ' · ' + st.count + '🔥 streak' : '');
         resultEl.style.display = 'block';
         shareBtn.style.display = 'inline-block';
+        document.getElementById('lbBtn2').style.display = 'inline-block';
         refreshDailyUI();
+        // submit to the global board (asks for initials on the very first time)
+        if (score > 0) ensureName(() => submitDailyScore(score));
       } else {
         label.textContent = 'Swapped out';
         resultEl.style.display = 'none';
         shareBtn.style.display = 'none';
+        document.getElementById('lbBtn2').style.display = 'none';
       }
       gameOverScreen.classList.remove('hidden');
       // Refresh the game-over ad if AdSense is live and player hasn't paid
