@@ -1010,10 +1010,24 @@
   function loop(t) {
     const dt = Math.min((t - lastTime) / 1000, 0.033);
     lastTime = t;
+    // Self-heal: mobile embeds (CrazyGames, itch, in-app browsers) can start
+    // the frame at 0x0 and never fire a resize event. Re-measure every frame.
+    if (W !== window.innerWidth || H !== window.innerHeight) {
+      const wasBroken = !W || !H || W < 50 || H < 50;
+      if (window.innerWidth > 0 && window.innerHeight > 0) {
+        resize();
+        if (state === 'menu' || wasBroken) reset();
+        else if (player) { // keep the player on screen after rotation
+          player.x = Math.min(Math.max(player.x, 20), W - 20);
+          player.y = Math.min(Math.max(player.y, 70), H - 20);
+        }
+      }
+    }
     update(dt);
     draw();
     requestAnimationFrame(loop);
   }
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
 
   reset();
   requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
