@@ -471,7 +471,15 @@
       // ---- SFX ----
       swap() { if (!ac) return; const t = ac.currentTime; tone(300, t, 0.12, 'sine', 0.5, sfxGain, 900); },
       shard() { if (!ac) return; const t = ac.currentTime; tone(880, t, 0.07, 'square', 0.25, sfxGain); tone(1320, t + 0.07, 0.09, 'square', 0.25, sfxGain); },
-      crash() { if (!ac) return; const t = ac.currentTime; noise(t, 0.35, 0.8, sfxGain, 2500); tone(140, t, 0.4, 'sine', 0.9, sfxGain, 35); },
+      crash(chainLvl = 1) {
+        if (!ac) return; const t = ac.currentTime;
+        noise(t, 0.35, 0.8, sfxGain, 2500); tone(140, t, 0.4, 'sine', 0.9, sfxGain, 35);
+        if (chainLvl > 1) tone(392 * Math.pow(1.26, Math.min(chainLvl - 1, 6)), t + 0.06, 0.18, 'square', 0.32, sfxGain);
+      },
+      whoosh() {
+        if (!ac) return; const t = ac.currentTime;
+        noise(t, 0.14, 0.22, sfxGain, 3200); tone(700, t, 0.14, 'sine', 0.13, sfxGain, 180);
+      },
       death() {
         if (!ac) return; const t = ac.currentTime;
         tone(400, t, 0.7, 'sawtooth', 0.5, sfxGain, 55);
@@ -759,6 +767,7 @@
   let score, best = 0, swaps, kills, elapsed;
   let swapCooldown, spawnTimerShard, spawnTimerSeeker, difficulty;
   let shake = 0, lastTime = 0, comboTimer = 0;
+  let hitPause = 0, chain = 0, chainTimer = 0, flashTint = null;
 
   // persistent best score on the player's device
   best = parseInt(storageGet('swapout_best') || '0', 10) || 0;
@@ -774,6 +783,7 @@
     shards = []; seekers = []; particles = []; beams = []; ripples = [];
     score = 0; swaps = 0; kills = 0; elapsed = 0;
     swapCooldown = 0; difficulty = 0;
+    hitPause = 0; chain = 0; chainTimer = 0; flashTint = null;
     spawnTimerShard = 0.5; spawnTimerSeeker = 2.2;
     hud.textContent = '0';
     spawnShard(); spawnShard();
@@ -839,6 +849,7 @@
 
     player.x = target.x; player.y = target.y;
     player.pulse = 1;
+    flashTint = { color: list === shards ? TEAL : CORAL, a: 0.22 };
 
     if (list === shards) {
       shards.splice(shards.indexOf(target), 1);
@@ -966,8 +977,13 @@
     ripples = ripples.filter(r => r.t < r.life);
     if (shake > 0) shake = Math.max(0, shake - dt * 40);
     if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) comboEl.style.opacity = 0; }
+    if (flashTint) { flashTint.a -= dt * 1.6; if (flashTint.a <= 0) flashTint = null; }
 
     if (state !== 'playing') return;
+
+    // hit-pause: the world freezes for a heartbeat on big impacts
+    if (hitPause > 0) { hitPause -= dt; return; }
+    if (chainTimer > 0) { chainTimer -= dt; if (chainTimer <= 0) chain = 0; }
 
     elapsed += dt;
     difficulty = Math.min(8, elapsed / 12);
@@ -1001,6 +1017,14 @@
       const a = s.angle + Math.sin(s.wobble) * 0.15;
       s.x += Math.cos(a) * s.speed * dt;
       s.y += Math.sin(a) * s.speed * dt;
+      // near-miss: a seeker grazing past you whooshes
+      if (s.grazeCd > 0) s.grazeCd -= dt;
+      const gd = Math.hypot(s.x - player.x, s.y - player.y);
+      if (gd < SEEKER_R + PLAYER_R + 26 && gd > SEEKER_R + PLAYER_R + 2 && !(s.grazeCd > 0)) {
+        s.grazeCd = 1.2;
+        audio.whoosh();
+        addRipple(player.x, player.y, 'rgba(157,180,200,0.9)');
+      }
     }
 
     for (let i = 0; i < seekers.length; i++) {
@@ -1010,10 +1034,14 @@
           burst((a.x + b.x) / 2, (a.y + b.y) / 2, CORAL, 26, 380);
           burst((a.x + b.x) / 2, (a.y + b.y) / 2, GOLD, 12, 250);
           seekers.splice(j, 1); seekers.splice(i, 1);
-          score += 10; kills++;
-          shake = 8;
-          audio.crash();
-          showCombo('CRASH +10');
+          chain = chainTimer > 0 ? chain + 1 : 1;
+          chainTimer = 2.0;
+          const bonus = 10 * chain;
+          score += bonus; kills++;
+          shake = 6 + chain * 3;
+          hitPause = 0.04 + Math.min(0.06, (chain - 1) * 0.02);
+          audio.crash(chain);
+          showCombo(chain > 1 ? 'CHAIN x' + chain + ' +' + bonus : 'CRASH +10');
           hud.textContent = score;
           i--; break;
         }
@@ -1093,11 +1121,19 @@
     ctx.globalAlpha = 1;
 
     for (const s of seekers) {
+      // rage: the closer a seeker gets, the redder, bigger-pulsing, and brighter it burns
+      const pd = Math.hypot(s.x - player.x, s.y - player.y);
+      const prox = Math.max(0, Math.min(1, 1 - (pd - 60) / 320));
+      const rage = prox * prox;
+      const pulse = 1 + rage * 0.22 * (0.5 + 0.5 * Math.sin(performance.now() / (150 - rage * 90) + s.wobble));
+      const r = Math.round(255), g = Math.round(122 - rage * 70), b = Math.round(89 - rage * 45);
+      const rageColor = 'rgb(' + r + ',' + g + ',' + b + ')';
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(s.angle);
-      ctx.shadowColor = CORAL; ctx.shadowBlur = 12;
-      ctx.fillStyle = CORAL;
+      ctx.scale(pulse, pulse);
+      ctx.shadowColor = rageColor; ctx.shadowBlur = 12 + rage * 16;
+      ctx.fillStyle = rageColor;
       ctx.beginPath();
       ctx.moveTo(SEEKER_R + 3, 0);
       ctx.lineTo(-SEEKER_R * 0.8, SEEKER_R * 0.8);
@@ -1139,6 +1175,14 @@
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+
+    // swap flash tint: the whole screen breathes the swap's colour for a beat
+    if (flashTint) {
+      ctx.globalAlpha = Math.max(0, flashTint.a);
+      ctx.fillStyle = flashTint.color;
+      ctx.fillRect(-20, -20, W + 40, H + 40);
+      ctx.globalAlpha = 1;
+    }
 
     ctx.restore();
   }
